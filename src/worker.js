@@ -5,11 +5,19 @@ import { encryptText, signPayload, verifyPayload } from "./lib/crypto.js";
 import { ALLOWED_MIMES, looksLikeMp4, checkMediaToken } from "./lib/media.js";
 import { getAdapter } from "./providers/index.js";
 import { handleQueue, enqueueDue, cleanupMedia } from "./queue.js";
+import { recomputePostStatus } from "./lib/posts.js";
 
 const routes = [];
 const route = (method, pattern, handler, auth = false) => routes.push({ method, re: new RegExp(`^${pattern}$`), handler, auth });
 const platformOf = (p) => { if (!PLATFORMS.includes(p)) throw new HttpError(404, "Platform tidak dikenal."); return p; };
 const emailOk = (e) => typeof e === "string" && /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(e);
+const configuredOrigin = (env) => {
+  let u;
+  try { u = new URL(env.PUBLIC_ORIGIN || ""); } catch { throw new HttpError(500, "PUBLIC_ORIGIN belum dikonfigurasi.", "CONFIG_MISSING"); }
+  if (u.protocol !== "https:" || !u.hostname || u.hostname.endsWith(".invalid") || u.username || u.password || u.pathname !== "/" || u.search || u.hash)
+    throw new HttpError(500, "PUBLIC_ORIGIN harus berupa origin HTTPS produksi yang valid.", "CONFIG_INVALID");
+  return u.origin;
+};
 
 // ---------- Publik ----------
 route("GET", "/api/health", async (_c, _r, env) => json({ ok: true, service: "SocialHub Akulaku API", version: "1.0.0-dev",
@@ -37,9 +45,21 @@ route("POST", "/api/auth/refresh", async (_c, req, env) => {
 });
 route("POST", "/api/auth/forgot", async (_c, req, env) => {   // alur resmi Supabase; respons selalu sama (tidak membocorkan email terdaftar)
   const { email } = await readJson(req);
-  if (emailOk(email)) await authPublic(env, "recover", { body: { email: email.trim().toLowerCase() } });
+  if (emailOk(email)) {
+    const redirectTo = `${configuredOrigin(env)}/reset-password.html`;
+    await authPublic(env, `recover?redirect_to=${encodeURIComponent(redirectTo)}`, { body: { email: email.trim().toLowerCase() } });
+  }
   return json({ message: "Jika email terdaftar, tautan reset password telah dikirim." });
 });
+route("POST", "/api/auth/password", async (c, req, env) => {
+  const { password } = await readJson(req);
+  if (typeof password !== "string" || password.length < 12) throw new HttpError(400, "Password baru minimal 12 karakter.");
+  const token = req.headers.get("Authorization")?.slice(7);
+  const result = await authPublic(env, "user", { method: "PUT", token, body: { password } });
+  if (!result.ok) throw new HttpError(400, "Password tidak dapat diperbarui. Tautan pemulihan mungkin sudah kedaluwarsa.");
+  await audit(env, { actor: c.user.id, action: "password_reset" });
+  return json({ ok: true, message: "Password berhasil diperbarui." });
+}, true);
 route("POST", "/api/auth/logout", async (c, req, env) => {
   await authPublic(env, "logout?scope=local", { token: req.headers.get("Authorization").slice(7) });
   await audit(env, { actor: c.user.id, action: "logout" });
@@ -50,8 +70,10 @@ route("POST", "/api/auth/logout", async (c, req, env) => {
 route("GET", "/api/media/([0-9a-fA-F-]{36})", async (_c, req, env, m) => {
   const id = mustUuid(m[1]);
   if (!(await checkMediaToken(env, id, new URL(req.url).searchParams.get("t")))) throw new HttpError(403, "Tautan media tidak valid atau kedaluwarsa.");
-  const [a] = await sb(env, `media_assets?id=eq.${id}&status=eq.uploaded&select=object_key,mime_type`) || [];
+  const [a] = await sb(env, `media_assets?id=eq.${id}&status=eq.uploaded&select=object_key,mime_type,uploaded_at`) || [];
   if (!a) throw new HttpError(404, "Media tidak ditemukan.");
+  const uploadedAt = Date.parse(a.uploaded_at || "");
+  if (!Number.isFinite(uploadedAt) || uploadedAt < Date.now() - 24 * 3600000) throw new HttpError(410, "Masa akses media telah berakhir.");
   const obj = await env.MEDIA.get(a.object_key, { range: req.headers });
   if (!obj) throw new HttpError(404, "Media tidak ditemukan.");
   const h = new Headers({ ...SEC_HEADERS, "Content-Type": a.mime_type, "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=300" });
@@ -93,9 +115,9 @@ route("DELETE", "/api/social-accounts/([a-z]+)", async (c, _r, env, m) => {
 route("GET", "/api/social/([a-z]+)/connect", async (c, req, env, m) => {
   const p = platformOf(m[1]), adapter = getAdapter(p);
   const [cfg] = await sb(env, `integration_settings?platform=eq.${p}&select=*`) || [];
-  if (!cfg || cfg.status === "disabled" || !cfg.client_id) throw new HttpError(409, `Integrasi ${p} belum diaktifkan oleh admin.`, "PLATFORM_NOT_AVAILABLE");
+  if (!cfg || cfg.status !== "enabled" || !cfg.client_id) throw new HttpError(409, `Integrasi ${p} belum diaktifkan oleh admin.`, "PLATFORM_NOT_AVAILABLE");
   if (!env.STATE_SECRET) throw new HttpError(500, "Konfigurasi server belum lengkap: STATE_SECRET.", "CONFIG_MISSING");
-  const origin = new URL(req.url).origin;
+  const origin = configuredOrigin(env);
   const redirectUri = cfg.redirect_uri || `${origin}/api/oauth/${p}/callback`;
   const state = await signPayload(env.STATE_SECRET, { u: c.user.id, p, n: crypto.randomUUID(), exp: Math.floor(Date.now() / 1000) + 600 });
   const scopes = cfg.scopes?.length ? cfg.scopes : adapter.defaultScopes;
@@ -105,15 +127,15 @@ route("GET", "/api/social/([a-z]+)/connect", async (c, req, env, m) => {
 // OAuth: callback (navigasi browser; pengguna diidentifikasi lewat state bertanda tangan)
 route("GET", "/api/oauth/([a-z]+)/callback", async (_c, req, env, m) => {
   const p = platformOf(m[1]), adapter = getAdapter(p), url = new URL(req.url);
-  const back = (q) => Response.redirect(`${url.origin}/oauth-done.html?${q}`, 302);   // halaman perantara: kembali ke APK lewat socialhub://oauth
+  const back = (q) => Response.redirect(`${configuredOrigin(env)}/oauth-done.html?${q}`, 302);   // halaman perantara: kembali ke APK lewat socialhub://oauth
   const st = await verifyPayload(env.STATE_SECRET || "", url.searchParams.get("state"));
   if (!st || st.p !== p) return back("oauth=invalid_state");
   if (url.searchParams.get("error") || !url.searchParams.get("code")) return back(`oauth=denied&platform=${p}`);
   try {
     const [cfg] = await sb(env, `integration_settings?platform=eq.${p}&select=*`) || [];
     const secret = env[`${p.toUpperCase()}_CLIENT_SECRET`];
-    if (!cfg?.client_id || !secret) return back(`oauth=not_configured&platform=${p}`);
-    const redirectUri = cfg.redirect_uri || `${url.origin}/api/oauth/${p}/callback`;
+    if (cfg?.status !== "enabled" || !cfg?.client_id || !secret) return back(`oauth=not_configured&platform=${p}`);
+    const redirectUri = cfg.redirect_uri || `${configuredOrigin(env)}/api/oauth/${p}/callback`;
     const t = await adapter.exchangeCode({ code: url.searchParams.get("code"), clientId: cfg.client_id, clientSecret: secret, redirectUri, env });
     const [acct] = await sb(env, "social_accounts?on_conflict=user_id,platform", { method: "POST", prefer: "resolution=merge-duplicates,return=representation",
       body: { user_id: st.u, platform: p, provider_user_id: t.providerUserId, username: t.username, status: "connected",
@@ -188,13 +210,19 @@ route("POST", "/api/posts", async (c, req, env) => {
   const [post] = await sb(env, "posts", { method: "POST", prefer: "return=representation",
     body: { user_id: c.user.id, caption, media_asset_id: mediaId, scheduled_at: scheduledAt, status: "queued",
       source_filename: null, mime_type: media.mime_type, file_size_bytes: media.size_bytes } });
-  const dests = await sb(env, "post_destinations", { method: "POST", prefer: "return=representation",
-    body: platforms.map(p => ({ post_id: post.id, user_id: c.user.id, platform: p, status: "queued", social_account_id: acctBy.get(p),
-      idempotency_key: `${post.id}:${p}`, next_attempt_at: scheduledAt && Date.parse(scheduledAt) > Date.now() + 60000 ? scheduledAt : null })) });
-  const origin = new URL(req.url).origin;
-  for (const d of dests) if (!d.next_attempt_at) await env.PUBLISH_QUEUE.send({ destinationId: d.id, origin });
+  let dests;
+  try {
+    const dispatchAt = scheduledAt || new Date().toISOString();
+    dests = await sb(env, "post_destinations", { method: "POST", prefer: "return=representation",
+      body: platforms.map(p => ({ post_id: post.id, user_id: c.user.id, platform: p, status: "queued", social_account_id: acctBy.get(p),
+        idempotency_key: `${post.id}:${p}`, next_attempt_at: dispatchAt })) });
+  } catch (e) {
+    // Kompensasi jika pembuatan destination gagal; tidak meninggalkan posting induk yatim.
+    await sb(env, `posts?id=eq.${post.id}&user_id=eq.${c.user.id}`, { method: "DELETE" }).catch(() => {});
+    throw e;
+  }
   await audit(env, { actor: c.user.id, action: "post_create", details: { post_id: post.id, platforms } });
-  return json({ post: { id: post.id, status: post.status }, message: scheduledAt ? "Posting dijadwalkan." : "Posting masuk antrean." }, 201);
+  return json({ post: { id: post.id, status: post.status }, message: scheduledAt ? "Posting dijadwalkan." : "Posting masuk antrean dan akan diproses oleh dispatcher." }, 201);
 }, true);
 
 route("GET", "/api/posts", async (c, _r, env) => json({ posts: await sb(env,
@@ -258,6 +286,12 @@ route("PATCH", "/api/admin/users/([0-9a-fA-F-]{36})/status", async (c, req, env,
     body: { is_active: active, deactivated_at: active ? null : new Date().toISOString() } });
   if (!upd?.length) throw new HttpError(404, "Karyawan tidak ditemukan.");
   await authAdmin(env, `users/${id}`, { method: "PUT", body: { ban_duration: active ? "none" : "876000h" } });   // putus sesi; histori posting tetap
+  if (!active) {
+    const cancelled = await sb(env, `post_destinations?user_id=eq.${id}&status=eq.queued`,
+      { method: "PATCH", body: { status: "cancelled", error_code: "USER_DEACTIVATED", error_message: "Karyawan dinonaktifkan sebelum publikasi.", updated_at: new Date().toISOString() },
+        prefer: "return=representation" });
+    for (const postId of new Set((cancelled || []).map(x => x.post_id))) await recomputePostStatus(env, postId);
+  }
   await audit(env, { actor: c.user.id, target: id, action: active ? "employee_activate" : "employee_deactivate" });
   return json({ ok: true });
 }, true);
@@ -297,7 +331,13 @@ route("PUT", "/api/admin/integrations/([a-z]+)", async (c, req, env, m) => {
   if (["disabled", "configured", "under_review", "approved", "enabled"].includes(b.status)) patch.status = b.status;
   if (Array.isArray(b.scopes)) patch.scopes = b.scopes.filter(s => typeof s === "string" && /^[\w.:-]{1,80}$/.test(s)).slice(0, 30);
   for (const k of ["redirect_uri", "webhook_url"]) if (patch[k] && !/^https:\/\//.test(patch[k])) throw new HttpError(400, `${k} harus HTTPS.`);
-  if (patch.status === "enabled" && !env[`${p.toUpperCase()}_CLIENT_SECRET`]) throw new HttpError(409, "Client Secret belum diatur di Worker secrets.");
+  if (patch.status === "enabled") {
+    const [current] = await sb(env, `integration_settings?platform=eq.${p}&select=client_id,redirect_uri`);
+    const clientId = patch.client_id ?? current?.client_id;
+    const redirectUri = patch.redirect_uri ?? current?.redirect_uri;
+    if (!clientId || !env[`${p.toUpperCase()}_CLIENT_SECRET`]) throw new HttpError(409, "Client ID dan Client Secret wajib dikonfigurasi sebelum integrasi diaktifkan.");
+    if (redirectUri && !/^https:\/\//.test(redirectUri)) throw new HttpError(400, "Redirect URI harus HTTPS.");
+  }
   await sb(env, `integration_settings?platform=eq.${p}`, { method: "PATCH", body: patch });
   await audit(env, { actor: c.user.id, action: "integration_update", details: { platform: p, fields: Object.keys(patch).filter(k => !k.startsWith("updated")) } });
   return json({ ok: true });

@@ -36,7 +36,7 @@ const isAdmin = () => me && ["admin", "owner"].includes(me.role);
 function shell(inner, route) {
   const nav = isAdmin() ? [["#/admin", "📊", "Ringkasan"], ["#/admin/employees", "👥", "Karyawan"], ["#/admin/pubs", "📋", "Publikasi"], ["#/admin/more", "⚙️", "Lainnya"]]
     : [["#/", "🏠", "Beranda"], ["#/new", "➕", "Posting"], ["#/history", "🕘", "Riwayat"], ["#/accounts", "🔗", "Akun"]];
-  $app.innerHTML = `<header class="top"><span class="emb" role="img" aria-label="SocialHub"></span><div class="t">Social<b>Hub</b> Akulaku</div><div class="sp"></div><button id="lo">Keluar</button></header>
+  $app.innerHTML = `<header class="top"><img src="/emblem.png" alt=""><div class="t">Social<b>Hub</b> Akulaku</div><div class="sp"></div><button id="lo">Keluar</button></header>
   <main>${inner}</main><nav class="nav">${nav.map(([h, i, l]) => `<a href="${h}" class="${route === h || (h !== "#/" && h !== "#/admin" && route.startsWith(h)) ? "on" : ""}"><i>${i}</i>${l}</a>`).join("")}</nav>`;
   document.getElementById("lo").onclick = async () => { try { await api("/api/auth/logout", { method: "POST" }); } catch {} logoutLocal(); location.hash = "#/login"; render(); };
 }
@@ -166,7 +166,7 @@ async function employeesView() {
   };
   shell(`<h1>Karyawan</h1><div class="card"><input id="q" type="search" placeholder="Cari nama atau email…"><div id="ul"></div></div>
   <div class="card"><h2>Tambah karyawan</h2><form id="nf"><label>Nama lengkap<input id="nn" required></label><label>Email<input id="ne" type="email" required></label>
-  <label>Password awal (min. 12 karakter)<input id="np" type="text" minlength="12" required autocomplete="off"></label><button class="btn red wide mt">Buat akun</button><p id="nm" class="msg"></p></form>
+  <label>Password awal (min. 12 karakter)<input id="np" type="text" minlength="12" required autocomplete="off"></label><button class="btn red wide" class="mt">Buat akun</button><p id="nm" class="msg"></p></form>
   <p class="small muted">Sampaikan password awal lewat jalur aman; karyawan dapat menggantinya lewat "Lupa password".</p></div>`, "#/admin/employees");
   await render2(); let tm; document.getElementById("q").oninput = (e) => { clearTimeout(tm); tm = setTimeout(() => render2(e.target.value), 300); };
   document.getElementById("nf").onsubmit = async (e) => { e.preventDefault(); const m = document.getElementById("nm"); m.className = "msg"; m.textContent = "Memproses…";

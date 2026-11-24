@@ -37,4 +37,3 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 .loader{text-align:center;padding:40px;color:var(--muted)}
 .mt{margin-top:14px}.blk{display:block}.row.top-al{align-items:flex-start}
 a.btn{text-decoration:none;text-align:center}a{color:var(--navy2)}.hero a{color:#fff}
-.top .emb{width:34px;height:34px;border-radius:9px;background:#000 url(/logo.png) no-repeat;background-size:69px 69px;background-position:-18px -5.5px;flex:none}

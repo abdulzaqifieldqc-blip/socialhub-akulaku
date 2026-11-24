@@ -21,8 +21,11 @@ export function mustUuid(v, name = "id") {
 }
 export async function readJson(req, maxBytes = 64 * 1024) {
   const text = await req.text();
-  if (text.length > maxBytes) throw new HttpError(413, "Permintaan terlalu besar.");
-  try { return text ? JSON.parse(text) : {}; } catch { throw new HttpError(400, "JSON tidak valid."); }
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new HttpError(413, "Permintaan terlalu besar.");
+  let value;
+  try { value = text ? JSON.parse(text) : {}; } catch { throw new HttpError(400, "JSON tidak valid."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new HttpError(400, "JSON harus berupa objek.");
+  return value;
 }
 // Hapus bagian yang mirip token/secret sebelum disimpan atau ditampilkan.
 export function sanitizeError(msg) {

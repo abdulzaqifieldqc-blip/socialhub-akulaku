@@ -27,8 +27,14 @@ export async function sbCount(env, path) {
   const res = await fetch(`${need(env, "SUPABASE_URL")}/rest/v1/${path}`, {
     method: "HEAD", headers: { ...keyHeaders(key), Prefer: "count=exact" }
   });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    console.error("supabase_count_error", res.status, sanitizeError(t));
+    throw new HttpError(500, "Gagal membaca statistik database.", "DB_COUNT_ERROR");
+  }
   const range = res.headers.get("content-range") || "*/0";
-  return Number(range.split("/")[1]) || 0;
+  const total = Number(range.split("/")[1]);
+  return Number.isFinite(total) ? total : 0;
 }
 export async function authAdmin(env, path, { method = "GET", body } = {}) {
   const key = need(env, "SUPABASE_SECRET_KEY");

@@ -1,0 +1,32 @@
+name: Build Debug APK
+# Jalankan dari HP: GitHub > Actions > "Build Debug APK" > Run workflow, isi base_url, lalu unduh artifact "SocialHub-debug-apk".
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL produksi Worker (HTTPS), contoh https://socialhub-akulaku.NAMA.workers.dev"
+        required: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validasi base_url
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url }}
+        run: |
+          case "$BASE_URL" in https://*) ;; *) echo "base_url harus diawali https://"; exit 1;; esac
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.10.2 }
+      - name: Build
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url }}
+        run: gradle -p android assembleDebug -PBASE_URL="$BASE_URL" --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SocialHub-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
