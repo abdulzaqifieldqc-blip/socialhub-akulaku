@@ -175,3 +175,21 @@ export async function cleanupMedia(env) {
   }
   return n;
 }
+
+// Rekonsiliasi: destination yang tersangkut "processing" (Worker berhenti di tengah jalan). Provider mungkin SUDAH menerima posting,
+// jadi TIDAK dicoba ulang otomatis (mencegah publikasi ganda). Ditandai gagal-tidak-pasti agar dicek manual di platform.
+export async function reconcileStuck(env, minutes = 15) {
+  const cutoff = new Date(Date.now() - minutes * 60000).toISOString();
+  const stuck = await sb(env, `post_destinations?status=eq.processing&updated_at=lt.${encodeURIComponent(cutoff)}&select=id,post_id,user_id,platform&limit=100`);
+  let n = 0;
+  for (const d of stuck || []) {
+    const upd = await sb(env, `post_destinations?id=eq.${d.id}&status=eq.processing&updated_at=lt.${encodeURIComponent(cutoff)}`, { method: "PATCH", prefer: "return=representation",
+      body: { status: "failed", error_code: "AMBIGUOUS_PROCESSING",
+        error_message: "Proses terhenti sehingga status publikasi tidak pasti. Periksa langsung di platform sebelum mengulang.", updated_at: new Date().toISOString() } });
+    if (!upd?.length) continue;
+    await recomputePostStatus(env, d.post_id);
+    await audit(env, { actor: null, target: d.user_id, action: "publish_ambiguous", details: { post_id: d.post_id, platform: d.platform } });
+    n++;
+  }
+  return n;
+}

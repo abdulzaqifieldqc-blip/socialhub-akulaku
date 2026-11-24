@@ -8,7 +8,7 @@ export async function recomputePostStatus(env, postId) {
   let status;
   if (s.some(x => x === "processing")) status = "processing";
   else if (s.some(x => x === "queued")) status = "queued";
-  else if (s.some(x => x === "needs_reconnect")) status = "needs_reconnect";
+  else if (s.some(x => x === "needs_reconnect")) status = "blocked";   // nilai "needs_reconnect" tidak diizinkan oleh CHECK posts.status; detail ada di status per platform
   else if (s.every(x => x === "cancelled")) status = "cancelled";
   else if (s.every(x => x === "published")) status = "published";
   else if (s.every(x => x === "failed")) status = "failed";
