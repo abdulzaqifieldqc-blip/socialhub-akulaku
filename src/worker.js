@@ -1,5 +1,5 @@
 import { HttpError, json, readJson, mustUuid, PLATFORMS, SEC_HEADERS, sanitizeError } from "./lib/util.js";
-import { sb, sbCount, authAdmin, authPublic, audit } from "./lib/supabase.js";
+import { sb, sbCount, sbRpc, authAdmin, authPublic, audit } from "./lib/supabase.js";
 import { authenticate, requireAdmin, checkLoginLimit, noteLoginFail, noteLoginOk } from "./lib/auth.js";
 import { encryptText, signPayload, verifyPayload } from "./lib/crypto.js";
 import { ALLOWED_MIMES, looksLikeMp4, checkMediaToken } from "./lib/media.js";
@@ -207,19 +207,26 @@ route("POST", "/api/posts", async (c, req, env) => {
   if (unavailable.length) throw new HttpError(409, `Belum tersedia (integrasi belum aktif): ${unavailable.join(", ")}.`, "PLATFORM_NOT_AVAILABLE");
   const notConnected = platforms.filter(p => !acctBy.has(p));
   if (notConnected.length) throw new HttpError(409, `Hubungkan akun terlebih dahulu: ${notConnected.join(", ")}.`, "ACCOUNT_NOT_CONNECTED");
-  const [post] = await sb(env, "posts", { method: "POST", prefer: "return=representation",
-    body: { user_id: c.user.id, caption, media_asset_id: mediaId, scheduled_at: scheduledAt, status: "queued",
-      source_filename: null, mime_type: media.mime_type, file_size_bytes: media.size_bytes } });
-  let dests;
-  try {
-    const dispatchAt = scheduledAt || new Date().toISOString();
-    dests = await sb(env, "post_destinations", { method: "POST", prefer: "return=representation",
-      body: platforms.map(p => ({ post_id: post.id, user_id: c.user.id, platform: p, status: "queued", social_account_id: acctBy.get(p),
-        idempotency_key: `${post.id}:${p}`, next_attempt_at: dispatchAt })) });
-  } catch (e) {
-    // Kompensasi jika pembuatan destination gagal; tidak meninggalkan posting induk yatim.
-    await sb(env, `posts?id=eq.${post.id}&user_id=eq.${c.user.id}`, { method: "DELETE" }).catch(() => {});
-    throw e;
+  const dispatchAt = scheduledAt || new Date().toISOString();
+  let post;
+  // Jalur utama: satu transaksi database (migration 009). Jika fungsi belum ada (404) -> jalur kompensasi lama.
+  const rpc = await sbRpc(env, "create_post_with_destinations", {
+    p_user: c.user.id, p_caption: caption, p_media: mediaId, p_scheduled: scheduledAt, p_mime: media.mime_type, p_size: media.size_bytes,
+    p_platforms: platforms, p_accounts: Object.fromEntries(platforms.map(p => [p, acctBy.get(p)])), p_dispatch: dispatchAt });
+  if (rpc.ok && typeof rpc.data === "string") post = { id: rpc.data, status: "queued" };
+  else if (rpc.status !== 404) throw new HttpError(500, "Kesalahan database.", "DB_ERROR");
+  else {
+    [post] = await sb(env, "posts", { method: "POST", prefer: "return=representation",
+      body: { user_id: c.user.id, caption, media_asset_id: mediaId, scheduled_at: scheduledAt, status: "queued",
+        source_filename: null, mime_type: media.mime_type, file_size_bytes: media.size_bytes } });
+    try {
+      await sb(env, "post_destinations", { method: "POST", prefer: "return=representation",
+        body: platforms.map(p => ({ post_id: post.id, user_id: c.user.id, platform: p, status: "queued", social_account_id: acctBy.get(p),
+          idempotency_key: `${post.id}:${p}`, next_attempt_at: dispatchAt })) });
+    } catch (e) {
+      await sb(env, `posts?id=eq.${post.id}&user_id=eq.${c.user.id}`, { method: "DELETE" }).catch(() => {});
+      throw e;
+    }
   }
   await audit(env, { actor: c.user.id, action: "post_create", details: { post_id: post.id, platforms } });
   return json({ post: { id: post.id, status: post.status }, message: scheduledAt ? "Posting dijadwalkan." : "Posting masuk antrean dan akan diproses oleh dispatcher." }, 201);
