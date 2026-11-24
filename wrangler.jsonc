@@ -17,7 +17,7 @@
     "MAX_UPLOAD_BYTES": "104857600",
     "MAX_PUBLISH_ATTEMPTS": "5",
     "META_GRAPH_VERSION": "v21.0",
-    "PUBLIC_ORIGIN": "https://SET-PUBLIC-ORIGIN.invalid",
+    "PUBLIC_ORIGIN": "https://socialhub-akulaku.abdulzaqi-fieldqc.workers.dev",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_g2h_qh7G7ldmrZbq53ILFQ_uuJ6Somj"
   },
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "socialhub-media" }],
