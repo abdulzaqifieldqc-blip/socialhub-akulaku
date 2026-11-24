@@ -27,3 +27,11 @@ test("semua migration SQL: begin/commit seimbang", () => {
     assert.equal((s.match(/\bbegin;/g) || []).length, (s.match(/\bcommit;/g) || []).length, f);
   }
 });
+
+test("migration 009: fungsi atomik hanya untuk service_role, non-destruktif", () => {
+  const s = strip(sql("009_atomic_post_create.sql")).toLowerCase();
+  assert.ok(!/\b(drop\s+table|delete\s+from|truncate)\b/.test(s));
+  assert.match(s, /security invoker/); assert.match(s, /set search_path = ''/);
+  assert.match(s, /revoke all on function public\.create_post_with_destinations\([^)]*\) from public, anon, authenticated/);
+  assert.match(s, /grant execute on function public\.create_post_with_destinations\([^)]*\) to service_role/);
+});

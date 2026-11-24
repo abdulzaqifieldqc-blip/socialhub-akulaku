@@ -61,3 +61,15 @@ export async function audit(env, { actor = null, target = null, action, details 
     await sb(env, "audit_logs", { method: "POST", body: { actor_user_id: actor, target_user_id: target, action, details } });
   } catch (e) { console.error("audit_failed", action); }   // audit gagal tidak boleh menjatuhkan permintaan
 }
+
+// Panggil fungsi database (RPC). Mengembalikan { ok, status, data }; TIDAK melempar saat fungsi belum ada (404),
+// agar pemanggil bisa memakai jalur cadangan.
+export async function sbRpc(env, name, args) {
+  const key = need(env, "SUPABASE_SECRET_KEY");
+  const res = await fetch(`${need(env, "SUPABASE_URL")}/rest/v1/rpc/${name}`, {
+    method: "POST", headers: { ...keyHeaders(key), "Content-Type": "application/json" }, body: JSON.stringify(args) });
+  const text = await res.text().catch(() => "");
+  if (!res.ok && res.status !== 404) console.error("supabase_rpc_error", name, res.status, sanitizeError(text));
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch {}
+  return { ok: res.ok, status: res.status, data };
+}
