@@ -1,28 +1,16 @@
 <!doctype html>
 <html lang="id">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#142d4e">
-  <title>Social Hub</title><link rel="stylesheet" href="/styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1f44">
+<title>SocialHub Akulaku</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar"><div class="brand"><span class="brand-icon">✦</span><span>SOCIAL HUB<small>One App. All Your Socials.</small></span></div><span id="who" class="muted"></span></header>
-  <main>
-    <section id="authView" class="auth-layout">
-      <div class="hero"><div class="eyebrow">SOCIAL MEDIA WORKSPACE</div><h1>Semua akun sosialmu.<br><em>Satu tempat.</em></h1><p>Kelola publikasi TikTok, Instagram, Facebook, dan Threads dari satu dashboard.</p><div class="platforms"><span>TikTok</span><span>Instagram</span><span>Facebook</span><span>Threads</span></div></div>
-      <div class="panel auth-panel"><div class="tabs"><button class="tab active" data-tab="login">Masuk</button><button class="tab" data-tab="register">Daftar</button></div>
-        <form id="authForm"><h2 id="authTitle">Selamat datang</h2><label id="nameWrap" class="hidden">Nama lengkap<input id="name" autocomplete="name"></label><label>Email<input id="email" type="email" required autocomplete="email"></label><label>Password<input id="password" type="password" required minlength="10" autocomplete="current-password"></label><button class="primary wide" id="authSubmit">Masuk ke Social Hub</button><p id="authMessage" class="message"></p><small class="muted">Password minimal 10 karakter. Gunakan email pribadi masing-masing karyawan.</small></form>
-      </div>
-    </section>
-    <section id="appView" class="hidden">
-      <div class="welcome"><div><div class="eyebrow">WORKSPACE</div><h1 id="greeting">Dashboard</h1><p class="muted">Kelola akun dan publikasi kontenmu.</p></div><button id="logout" class="ghost">Keluar</button></div>
-      <div class="stats"><article class="stat"><span>Total publikasi</span><strong id="totalPosts">0</strong></article><article class="stat"><span>Berhasil</span><strong id="publishedPosts">0</strong></article><article class="stat"><span>Dalam antrean</span><strong id="queuedPosts">0</strong></article></div>
-      <div class="columns"><section class="panel"><div class="section-head"><div><div class="eyebrow">AKUN TERHUBUNG</div><h2>Media sosial</h2></div></div><div id="accounts" class="account-list"></div><p class="hint">Koneksi resmi tiap platform dilakukan melalui OAuth setelah aplikasi developer dan izinnya disiapkan.</p></section>
-      <section class="panel"><div class="eyebrow">PUBLISHING</div><h2>Buat posting</h2><form id="postForm"><label>Caption<textarea id="caption" rows="4" placeholder="Tulis caption kontenmu..."></textarea></label><label>URL media<input id="mediaUrl" type="url" placeholder="https://... (sementara: URL media)"></label><label>Jenis media<select id="mediaType"><option value="">Tidak ditentukan</option><option value="image">Foto</option><option value="video">Video</option></select></label><div class="field-label">Pilih platform</div><div class="checks"><label><input type="checkbox" value="tiktok"> TikTok</label><label><input type="checkbox" value="instagram"> Instagram</label><label><input type="checkbox" value="facebook"> Facebook</label><label><input type="checkbox" value="threads"> Threads</label></div><button class="primary wide">Masukkan ke antrean</button><p id="postMessage" class="message"></p></form></section></div>
-      <section class="panel history"><div class="section-head"><div><div class="eyebrow">AKTIVITAS</div><h2>Riwayat publikasi</h2></div><button id="refresh" class="ghost">Muat ulang</button></div><div id="historyList" class="history-list"><p class="muted">Belum ada publikasi.</p></div></section>
-      <section id="adminPanel" class="panel hidden"><div class="eyebrow">ADMINISTRATION</div><h2>Panel admin</h2><p class="muted">Daftar pengguna dan kontrol akses karyawan.</p><div id="userList"></div></section>
-    </section>
-    <footer>Social Hub · Versi fondasi 0.1 · Integrasi API resmi memerlukan konfigurasi dan persetujuan platform.</footer>
-  </main>
-  <script src="/app.js"></script>
-</body></html>
+<div id="app"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
