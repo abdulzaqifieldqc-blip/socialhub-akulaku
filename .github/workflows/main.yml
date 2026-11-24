@@ -1,3 +1,4 @@
+
 name: SocialHub Cloudflare Deploy
 
 on:
@@ -5,12 +6,9 @@ on:
     branches:
       - stage-3-backend
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: Deploy to Cloudflare
-        required: true
-        type: boolean
-        default: false
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -36,7 +34,6 @@ jobs:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
     needs: test
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
 
     steps:
       - name: Checkout repository
