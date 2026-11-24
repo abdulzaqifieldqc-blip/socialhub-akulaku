@@ -4,7 +4,7 @@ import { authenticate, requireAdmin, checkLoginLimit, noteLoginFail, noteLoginOk
 import { encryptText, signPayload, verifyPayload } from "./lib/crypto.js";
 import { ALLOWED_MIMES, looksLikeMp4, checkMediaToken } from "./lib/media.js";
 import { getAdapter } from "./providers/index.js";
-import { handleQueue, enqueueDue, cleanupMedia } from "./queue.js";
+import { handleQueue, enqueueDue, cleanupMedia, reconcileStuck } from "./queue.js";
 import { recomputePostStatus } from "./lib/posts.js";
 
 const routes = [];
@@ -197,8 +197,11 @@ route("POST", "/api/posts", async (c, req, env) => {
     const lim = getAdapter(p).limits;
     if (caption.length > lim.maxCaption) throw new HttpError(400, `Caption ${p} maksimal ${lim.maxCaption} karakter.`);
   }
-  const [media] = await sb(env, `media_assets?id=eq.${mediaId}&user_id=eq.${c.user.id}&status=eq.uploaded&select=id,size_bytes,mime_type`) || [];
+  const [media] = await sb(env, `media_assets?id=eq.${mediaId}&user_id=eq.${c.user.id}&status=eq.uploaded&select=id,size_bytes,mime_type,uploaded_at`) || [];
   if (!media) throw new HttpError(400, "Video belum diunggah atau bukan milik Anda.");
+  // Media hanya disimpan 24 jam sejak unggah: jadwal tidak boleh melewati masa itu (margin 1 jam).
+  if (scheduledAt && Date.parse(scheduledAt) > Date.parse(media.uploaded_at || 0) + 23 * 3600000)
+    throw new HttpError(400, "Jadwal terlalu jauh: video hanya disimpan 24 jam setelah diunggah. Pilih waktu maksimal 23 jam setelah unggah.", "SCHEDULE_BEYOND_RETENTION");
   const cfg = await sb(env, "integration_settings?select=platform,status");
   const enabled = new Set((cfg || []).filter(x => x.status === "enabled").map(x => x.platform));
   const accts = await sb(env, `social_accounts?user_id=eq.${c.user.id}&status=eq.connected&select=id,platform`);
@@ -375,6 +378,6 @@ export default {
   queue: (batch, env) => handleQueue(batch, env),
   async scheduled(event, env) {
     if (event.cron === "* * * * *") await enqueueDue(env);
-    else await cleanupMedia(env);
+    else { await cleanupMedia(env); await reconcileStuck(env); }
   }
 };
